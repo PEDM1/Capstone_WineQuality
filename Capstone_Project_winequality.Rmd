@@ -1,0 +1,903 @@
+---
+title: "Wine Quality Capstone Project"
+author: "Manuel_5600 (edx username)"
+date: "18th of March 2019"
+output: 
+  pdf_document: 
+    latex_engine: xelatex
+    toc: true
+    toc_depth: 2
+  
+---
+
+```{r setup, message=FALSE, echo=FALSE, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+
+# Load Library
+
+library(knitr)
+library(ggrepel)
+library(kableExtra)
+library(dslabs)
+library(caret)
+library(tidyverse)
+library(Rborist)
+library(readr)
+library(grid)
+library(gridExtra)
+library(GGally)
+library(rpart)
+library(ROSE)
+
+
+# Load data - csv files winequality red and white from the archive of UCI / added to GitHub due to certificate issues on the UCI website and as back-up
+
+winequality_white <- read_delim("https://raw.github.com/PEDM1/Capstone_WineQuality/master/winequality-white.csv", ";", 
+                                 escape_double = FALSE, col_types = cols(alcohol = col_number(), 
+                                 chlorides = col_number(), `citric acid` = col_number(), 
+                                 density = col_number(), `fixed acidity` = col_number(), 
+                                 `free sulfur dioxide` = col_number(), 
+                                 pH = col_number(), quality = col_character(), 
+                                 `residual sugar` = col_number(), 
+                                 sulphates = col_number(), `total sulfur dioxide` = col_number(), 
+                                 `volatile acidity` = col_number()), trim_ws = TRUE)
+
+names(winequality_white)<-make.names(names(winequality_white),unique = TRUE)
+
+winequality_red <- read_delim("https://raw.github.com/PEDM1/Capstone_WineQuality/master/winequality-red.csv", ";", 
+                               escape_double = FALSE, col_types = cols(alcohol = col_number(), 
+                               chlorides = col_number(), `citric acid` = col_number(), 
+                               density = col_number(), `fixed acidity` = col_number(), 
+                               `free sulfur dioxide` = col_number(), 
+                               pH = col_number(), quality = col_character(), 
+                               `residual sugar` = col_number(), 
+                               sulphates = col_number(), `total sulfur dioxide` = col_number(), 
+                               `volatile acidity` = col_number()), trim_ws = TRUE)
+
+names(winequality_red)<-make.names(names(winequality_red),unique = TRUE)
+```
+
+\  
+
+**************************
+
+\newpage
+
+# Introduction/Overview/Summary
+
+The two data sets are available on the UCI machine learning repository (Source: https://archive.ics.uci.edu/ml/datasets/wine+quality) and related to red and white wine. Each row contains a quality score ranging from 0 to 10 and eleven physicochemical properties of the corresponding wine sample. Firstly, the goal was to predict a wine's quality based on its wine properties and secondly to predict if these properties belong to a red or a white wine. In a nutshell, the train function with the method Rborist and the tuning parameters predFixed and minNode was used. Furthermore, the wine quality ratings were grouped and the data was balanced in multiple attempts to achieve higher accuracy, sensitivity and specificity. The R code is excluded from this report in order to assure better readability. However, the R and Rmd files are available to the reader.    
+
+## Data Set Structure - General Overview
+
+The structure of the two data sets is illustrated below. The physicochemical wine properties are fixed acidity, volatile acidity, citric acid, residual sugar, chlorides, free sulfur dioxide, total sulfur dioxide, density, pH, sulphates and alcohol. The quality score is based on sensory data (a score between 0 and 10 / increasing quality score = increasing quality). 
+
+\  
+
+```{r White Wine Quality Structure, echo=FALSE, message=FALSE, fig.align='center', fig.height=7}
+
+# Explore data - the structure of the data set
+
+winequality_white %>% head(7) %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 7, full_width = TRUE) %>% footnote(general = "wine quality white / limited to 7 rows") %>% row_spec(0, angle=-90, bold = TRUE)
+```
+
+\  
+
+```{r Red Wine Quality Structure, echo=FALSE, message=FALSE, fig.align='center', fig.height=7}
+
+# Explore data - the structure of the data set
+
+winequality_red %>% head(7) %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 7, full_width = TRUE) %>% footnote(general = "wine quality red / limited to 7 rows") %>% row_spec(0, angle=-90, bold = TRUE)
+```
+
+\newpage
+
+## Distribution and Correlation - General Overview
+
+**Distribution:** The wines were mostly awarded average scores from 5 to 7. Some of the very bad and very good ratings do not exist at all (e.g. 0, 1, 2, 10) and some were only given very rarely (e.g. 9). This is not surprising due to the fact that the provider of the data set states: *"The classes are ordered and not balanced (e.g. there are much more normal wines than excellent or poor ones)"* (Source: https://archive.ics.uci.edu/ml/datasets/wine+quality).
+  
+**Correlation:** The correlation matrix does not state very high correlation coefficients for any of the wine properties in relation to wine quality. Alcohol seems to have the highest positive correlation of 0.4 (white) and 0.5 (red) and thus seems to improve quality in both red and white wine. Moreover, an increasing amount of volatile acidity seems to decrease the quality (especially in red wine, e.g. -0.4 in red wine). Volatile acidity is gaseous and has a smell. Sweet wines and wines made from dried grapes often contain high levels of volatile acidity. Sometimes it might even add complexity and interest but in high quantities it can be disturbing (similar to the smell of vinegar or nail polish) (Source: https://www.decanter.com/learn/volatile-acidity-va-45532/). Actually, volatile acidity is a great example to highlight the complexity of sensory evaluation (it may or may not increase quality). Additionally, the data set does show high correlation within the physicochemical wine properties (e.g. 0.8 = residual sugar and density in white wine, 0.6 and 0.7 = free sulfur dioxide and total sulfur dioxide in both wine types, 0.7 = fixed acidity and citric acid in red wine, 0.7 = fixed acidity and density in red wine). Lastly, the white wine correlation matrix seems to differ from the red wine matrix. This might become important as soon as we try to predict the type of wine (red or white).  Remember that a 0 indicates no correlation, -1 a perfect negative and 1 a perfect positive correlation. 
+
+\  
+
+```{r Wine Quality Plots Correlation Distribution, echo=FALSE, message=FALSE, fig.align='center', fig.height=4}
+
+# Explore data - distribution of the wine quality - white and red
+
+plot_white_cor <- winequality_white %>% mutate(quality = as.numeric(quality)) %>% ggcorr(hjust = 1, size = 1.5, label=TRUE, label_size = 1.5, layout.exp = 2) + ggtitle("Correlation White Wine Quality") + theme(plot.title = element_text(size = 8, face = "bold"))
+
+plot_red_cor <- winequality_red %>% mutate(quality = as.numeric(quality)) %>% ggcorr(hjust = 1, size = 1.5, label=TRUE, label_size = 1.5, layout.exp = 2) + ggtitle("Correlation Red Wine Quality") + theme(plot.title = element_text(size = 8, face = "bold"))
+
+plot_white_dis <- winequality_white %>% mutate(count = 1) %>% ggplot() + geom_col(aes(x=quality, y=count)) + ggtitle("Distribution White Wine Quality") + theme(plot.title = element_text(size = 8, face = "bold"))
+
+plot_red_dis <- winequality_red %>% mutate(count = 1) %>% ggplot() + geom_col(aes(x=quality, y=count)) + ggtitle("Distribution Red Wine Quality") + theme(plot.title = element_text(size = 8, face = "bold"))
+
+grid.arrange(plot_white_cor, plot_red_cor, plot_white_dis, plot_red_dis, ncol=2)
+```
+
+\newpage  
+
+## Regression/Classification Trees and Random Forests - General Overview
+
+We all know that a forest consists of many trees. In data science a tree is a flow chart of yes/no questions. An algorithm uses data to create these trees (by partitioning the predictors) with predictions at the ends (referred to as nodes). Classification or decision trees are used for categorical outcomes and regression trees for continuous outcomes (Source: https://rafalab.github.io/dsbook/examples-of-algorithms.html#classification-and-regression-trees-cart).
+  
+The plots below are just examples to illustrate what such a tree might look like. Furthermore, the two plots proof that trees can be adjusted by tuning some of the parameters (e.g. the left tree has a complexity parameter (cp) of 0 and the right one of 0.0018, both are created with the rpart function and with minsplit of 20). Larger cp values stop the algorithm earlier which results in fewer nodes. This is due to the fact that any split which does not lower the overall lack of fit by the cp factor is not done. Minsplit is the minimum amount of observations that must exist in a node for a split to be attempted. 20 is the default value (Sources: https://rafalab.github.io/dsbook/examples-of-algorithms.html#classification-and-regression-trees-cart and https://stat.ethz.ch/R-manual/R-devel/library/rpart/html/rpart.control.html).
+
+The random forest method is popular in machine learning. It tries to improve the prediction performance and to reduce instability by averaging decision trees. In a nutshell, a random forest is a forest of trees which has been constructed with randomness. The method generates many predictors (each using regression or classification trees) and a final prediction based on the average prediction of all the generated trees. In order to avoid identical individual trees, bootstrap is used to induce randomness (Source: https://rafalab.github.io/dsbook/examples-of-algorithms.html#classification-and-regression-trees-cart).
+
+\  
+
+```{r Sample Tree, echo=FALSE, message=FALSE, fig.align='center', fig.width=16, fig.height=12}
+
+# Plotting two trees / only as an example what it might look like
+
+par(mfrow=c(1,2)) #to create a side by side layout
+
+tree_1 <- rpart(quality ~ ., data = winequality_white, control = rpart.control(cp = 0, minsplit = 20))
+plot(tree_1)
+text(tree_1)
+
+tree_2 <- rpart(quality ~ ., data = winequality_white, control = rpart.control(cp = 0.0018, minsplit = 20))
+plot(tree_2)
+text(tree_2)
+```
+
+\newpage
+
+# Data Set: White Wine - Rating on a Scale from 0 to 10?
+
+As a first step, we are going to focus on the white wine. An initial familiarization with the available data set was necessary. It is already known that the data set mainly focuses on average wines. Therefore, we might encounter a lack of data that describes the wine properties for bad and good wines. Please find below an illustration showing a combination of jitter and boxplot with quality on the x and the value of a specific wine property on the y axis. Most of the boxplots do not seem to show a clear trend (e.g. increasing from 0 to 10). However, the quality scores 5, 6, 7 that contain most of the data seem to reveal trends. Furthermore, some outliers are visible which is not surprising due to the fact that the provider of the data set mentions that *"outlier detection algorithms could be used to detect the few excellent or poor wines"* (Source: https://archive.ics.uci.edu/ml/datasets/wine+quality). We did not remove any of the outliers in the training or test data set.  
+
+\  
+
+```{r Wine Quality Boxplots, echo=FALSE, message=FALSE, fig.align='center', fig.width=16, fig.height=14}
+
+# Explore data - the quality of red and white wine is rated from 0 to 10
+
+plot_explore_white1 <- winequality_white %>% ggplot(aes(x=quality, y=fixed.acidity)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_white2 <- winequality_white %>% ggplot(aes(x=quality, y=volatile.acidity)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_white3 <- winequality_white %>% ggplot(aes(x=quality, y=citric.acid)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_white4 <- winequality_white %>% ggplot(aes(x=quality, y=residual.sugar)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4)
+
+plot_explore_white5 <- winequality_white %>% ggplot(aes(x=quality, y=chlorides)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_white6 <- winequality_white %>% ggplot(aes(x=quality, y=free.sulfur.dioxide)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_white7 <- winequality_white %>% ggplot(aes(x=quality, y=total.sulfur.dioxide)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_white8 <- winequality_white %>% ggplot(aes(x=quality, y=density)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_white9 <- winequality_white %>% ggplot(aes(x=quality, y=pH)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_white10 <- winequality_white %>% ggplot(aes(x=quality, y=sulphates)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_white11 <- winequality_white %>% ggplot(aes(x=quality, y=alcohol)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4)
+
+grid.arrange(plot_explore_white1, plot_explore_white2, plot_explore_white3, plot_explore_white4, plot_explore_white5, plot_explore_white6, plot_explore_white7, plot_explore_white8, plot_explore_white9, plot_explore_white10, plot_explore_white11, ncol=3)
+```
+
+\newpage  
+
+## Methods/Analysis/Results
+
+Let's try to predict the quality ratings for white wine (rating from 0 to 10). The initial goal was to optimize overall accuracy (the overall proportion that is predicted correctly). 
+  
+The caret train function was used and Rborist was chosen as training method for the random forest. It offers the tuning parameters predFixed and minNode. PredFixed is the actual number of predictors for a split. The default value seems to be 0. The minNode parameter is a lower limit for node sizes, which is the amount of distinct samples subsumed by each node. A value of 1 allows splitting until purity. A larger value results in a smaller tree and faster training (Source: https://cran.r-project.org/web/packages/Rborist/vignettes/rborist.html). The plot below shows the development of overall accuracy for changing values of minNode. The table best tune shows the combination of predFixed and minNode that resulted in the highest overall accuracy. Tuning of predFixed did not seem to cause major accuracy improvements but it increased training time substantially. Furthermore, we tried using knn (k nearest neighbor) with the tuning parameter k, which did not result in a major improvement as well. 
+  
+Moreover, the two properties free sulfur dioxide and citric acid which show a correlation of 0 in the white wine correlation matrix were not removed (removal did actually cause a decrease in overall accuracy). Another trial for which we only used density (−0.3 correlation) and alcohol (0.4 correlation) also resulted in a decrease of overall accuracy. This is why none of the eleven properties were removed.  Furthermore, the variable importance of Rborist does not show a variable that is clearly more important. 
+
+\  
+
+```{r Random Forest Quality 1 to 10, echo=FALSE,  message=FALSE, fig.align='center', fig.width=16, fig.height=4}
+
+# Create train set, test set - the quality of red and white wine is rated from 0 to 10
+
+test_index_rating <- createDataPartition(winequality_white$quality, times = 1, p = 0.5, list = FALSE)
+test_set_rating <- winequality_white[test_index_rating, ]
+train_set_rating <- winequality_white[-test_index_rating, ]
+
+
+# Let’s try to predict the quality using Rborist - the quality of red and white wine is rated from 1 to 10 / Create train and prediction
+
+train_Rborist_rating <- train(quality ~ .,
+                        method = "Rborist",
+                        tuneGrid = data.frame(predFixed = 0, minNode = seq(1, 5, 1)),
+                        data = train_set_rating)
+
+train_Rborist_rating$bestTune %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 9, full_width = FALSE) %>% footnote(general = "best tune")
+
+plot(train_Rborist_rating)
+
+varImp(train_Rborist_rating, scale = FALSE)
+
+y_hat_Rborist_rating <- predict(train_Rborist_rating, test_set_rating) %>% factor()
+
+Accuracy_Rborist_rating <- mean(y_hat_Rborist_rating == test_set_rating$quality)
+Accuracy_Rborist_rating # Calculate Accuracy
+```
+
+\  
+
+**The random forest predicted the quality ratings with an overall accuracy of almost two-thirds (see exact number above). This is not too bad for our first attempt but seems to be of limited usefulness.** 
+
+\  
+
+## Confusion Matrix
+
+Overall accuracy can be a deceptive measure. Biased data sets are split into biased training and test sets and therefore most likely result in a biased algorithm. An improvement to exclusively using overall accuracy is to additionally calculate sensitivity and specificity. Sensitivity is the ability to predict a positive outcome when the outcome is actually positive. Specificity is the ability to not predict a positive when the outcome is actually not a positive. A confusion matrix was constructed, which illustrates the predictions and the actual values. Furthermore, it calculates overall accuracy, sensitivity and specificity (Source: https://rafalab.github.io/dsbook/introduction-to-machine-learning.html#the-confusion-matrix).
+
+\  
+
+```{r Confusion Matrix 1 to 10, echo=FALSE,  message=FALSE, fig.align='center', fig.height=5}
+
+# Create confusion matrix
+
+test_set_quality_Rborist_rating <- test_set_rating$quality %>% factor()
+
+CM_rating <- confusionMatrix(data = y_hat_Rborist_rating, reference = test_set_quality_Rborist_rating)
+
+CM_rating$table %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 7, full_width = FALSE) %>% footnote(general = "confusion matrix")
+
+CM_rating$overall["Accuracy"] %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 7, full_width = FALSE) %>% footnote(general = "overall accuracy")
+
+CM_rating$byClass %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 6, full_width = TRUE) %>% footnote(general = "by class")
+```
+
+\  
+
+**As mentioned before, the random forest predicted the eleven quality ratings with an overall accuracy of almost two-thirds (exact number mentioned above). This is not too bad but seems to be of limited usefulness. Additionally, it was mainly correct at predicting "average" wines and did a poor job at detecting "bad" and "good" wines.** 
+
+\newpage
+
+## Error Investigation
+
+We tried to further investigate where the errors occurred. The plots help us to visually discover lots of wrong predictions. However, we did not find a clear pattern that would help us in the pursuit of higher accuracy (except that there are hardly any data points for some quality scores which we already discovered earlier).  
+
+```{r Error Plots 1 to 10, echo=FALSE,  message=FALSE, fig.align='center', fig.width=16, fig.height=14}
+
+# Creating a column "error" with wrong or right predictions and plots
+
+differences_rating <- test_set_rating %>% cbind.data.frame(y_hat_Rborist_rating) %>% mutate(error = ifelse(quality != y_hat_Rborist_rating, "wrong", "right"))
+
+differences_rating %>% filter(error == "wrong") %>% nrow() # Amount of wrong predictions
+
+plot_error_rating1 <- differences_rating %>% ggplot(aes(x=error, y=fixed.acidity)) + geom_jitter(aes(color=quality), alpha=0.3)
+
+plot_error_rating2 <- differences_rating %>% ggplot(aes(x=error, y=volatile.acidity)) + geom_jitter(aes(color=quality), alpha=0.3)
+
+plot_error_rating3 <- differences_rating %>% ggplot(aes(x=error, y=citric.acid)) + geom_jitter(aes(color=quality), alpha=0.3)
+
+plot_error_rating4 <- differences_rating %>% ggplot(aes(x=error, y=residual.sugar)) + geom_jitter(aes(color=quality), alpha=0.3)
+
+plot_error_rating5 <- differences_rating %>% ggplot(aes(x=error, y=free.sulfur.dioxide)) + geom_jitter(aes(color=quality), alpha=0.3)
+
+plot_error_rating6 <- differences_rating %>% ggplot(aes(x=error, y=total.sulfur.dioxide)) + geom_jitter(aes(color=quality), alpha=0.3)
+
+plot_error_rating7 <- differences_rating %>% ggplot(aes(x=error, y=density)) + geom_jitter(aes(color=quality), alpha=0.3)
+
+plot_error_rating8 <- differences_rating %>% ggplot(aes(x=error, y=pH)) + geom_jitter(aes(color=quality), alpha=0.3)
+
+plot_error_rating9 <- differences_rating %>% ggplot(aes(x=error, y=sulphates)) + geom_jitter(aes(color=quality), alpha=0.3)
+
+plot_error_rating10 <- differences_rating %>% ggplot(aes(x=error, y=alcohol)) + geom_jitter(aes(color=quality), alpha=0.3)
+
+plot_error_rating11 <- differences_rating %>% ggplot(aes(x=error, y=chlorides)) + geom_jitter(aes(color=quality), alpha=0.3)
+
+grid.arrange(plot_error_rating1, plot_error_rating2, plot_error_rating3, plot_error_rating4, plot_error_rating5, plot_error_rating6, plot_error_rating7, plot_error_rating8, plot_error_rating9, plot_error_rating10, plot_error_rating11, ncol=2)
+```
+
+\newpage
+
+# Data Set: White Wine - "Good", "Average" or "Bad"?
+
+\  
+
+## Distribution and Correlation
+
+**Distribution:** Our initial data exploration showed that the ratings were not equally distributed at all (e.g. some ratings were given more often than others). Let's try to predict the quality ratings for white wine after grouping into "good" (rating 7-10), "average" (rating 4-6) and "bad" (rating 0-3). The ratings were split in a way to contain similar amounts of ratings ("bad" contains the ratings 0, 1, 2, 3 / "average" contains 4, 5, 6 / "good" contains 7, 8, 9, 10). Empty rating categories (e.g. rating 1) were not dropped due to the fact that they might suddenly exist in real life data. There was no information available on what the numerical ratings (0-10) actually mean. We only know the meaning of the extreme values (0 is equal to "very bad" and 10 to "excellent"). However, even after grouping the quality ratings into 3 groups, the group "bad" hardly exists.  
+  
+**Correlation:** Furthermore, the grouping only caused minor changes in the correlation coefficients of the wine properties in relation to the wine quality. The correlation within the wine properties remains unchanged (same data). Remember that a 0 indicates no correlation, -1 a perfect negative and 1 a perfect positive correlation. 
+
+\  
+
+```{r Quality Good Average Bad Correlation Distribution, echo=FALSE, message=FALSE, fig.align='center', fig.height=5}
+
+# Change the quality rating to "good" (rating 7-10), "average" (rating 4-6) and "bad" (rating 0-3)
+
+winequality_white_GoodAverageBad <- winequality_white %>% mutate(quality_GoodAverageBad = 
+                                              ifelse(winequality_white$quality == 0, "bad", 
+                                              ifelse(winequality_white$quality == 1, "bad", 
+                                              ifelse(winequality_white$quality == 2, "bad", 
+                                              ifelse(winequality_white$quality == 3, "bad", 
+                                              ifelse(winequality_white$quality == 4, "average", 
+                                              ifelse(winequality_white$quality == 5, "average", 
+                                              ifelse(winequality_white$quality == 6, "average", "good")))))))) %>% select(-quality)
+
+
+# Explore data - distribution of white wine quality "good", "average", "bad"
+
+plot_GoodAverageBad_dis <- winequality_white_GoodAverageBad %>% mutate(count = 1) %>% ggplot() + geom_col(aes(x=quality_GoodAverageBad, y=count)) + ggtitle("Distribution White Wine - Good, Average, Bad") + theme(plot.title = element_text(size = 8, face = "bold"))
+
+
+# Explore data - correlation of white wine quality "good", "average", "bad" / Transform quality groups to numeric
+
+plot_GoodAverageBad_cor <- winequality_white_GoodAverageBad %>% mutate(wine_numeric = ifelse(winequality_white_GoodAverageBad$quality_GoodAverageBad == "bad", 1, ifelse(winequality_white_GoodAverageBad$quality_GoodAverageBad == "average", 2, ifelse(winequality_white_GoodAverageBad$quality_GoodAverageBad == "good", 3, "")))) %>% mutate(wine_numeric = as.numeric(wine_numeric)) %>% select(-quality_GoodAverageBad) %>% ggcorr(hjust = 1, size = 2, label=TRUE, label_size = 1.5, layout.exp = 2) + ggtitle("Correlation White Wine - Good, Average, Bad") + theme(plot.title = element_text(size = 8, face = "bold"))
+
+grid.arrange(plot_GoodAverageBad_cor, plot_GoodAverageBad_dis, ncol=1)
+```
+
+\newpage
+
+## Methods/Analysis/Results
+
+The same method was applied to the new data set (Rborist in caret train function). The table "best tune" shows the combination of predFixed and minNode that resulted in the highest overall accuracy.  Tuning of predFixed did not seem to cause major accuracy improvements but it increased training time substantially. The goal was again to optimize overall accuracy, which is simply defined as the overall proportion that is predicted correctly. A change was discovered in the variable importance of Rborist. However, removal of certain variables did not cause a relevant improvement of overall accuracy. Additionally, knn (k nearest neighbor) with the tuning parameter k was tried, which did not result in a major improvement as well. 
+
+\  
+
+```{r Random Forest Quality Good Average Bad, echo=FALSE,  message=FALSE, fig.align='center', fig.width=16, fig.height=4}
+
+# Create train set, test set - "good", "average" and "bad" rating
+
+test_index_GoodAverageBad <- createDataPartition(winequality_white_GoodAverageBad$quality_GoodAverageBad, times = 1, p = 0.5, list = FALSE)
+test_set_GoodAverageBad <- winequality_white_GoodAverageBad[test_index_GoodAverageBad, ]
+train_set_GoodAverageBad <- winequality_white_GoodAverageBad[-test_index_GoodAverageBad, ]
+
+
+# Let’s try to predict the quality using Rborist again - "good", "average" and "bad" rating / Create train and prediction
+
+train_Rborist_GoodAverageBad <- train(quality_GoodAverageBad ~ .,
+                                method = "Rborist",
+                                tuneGrid = data.frame(predFixed = 0, minNode = seq(1, 5, 1)),
+                                data = train_set_GoodAverageBad)
+
+train_Rborist_GoodAverageBad$bestTune %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 9, full_width = FALSE) %>% footnote(general = "best tune")
+
+plot(train_Rborist_GoodAverageBad)
+
+varImp(train_Rborist_GoodAverageBad, scale = FALSE)
+
+y_hat_Rborist_GoodAverageBad <- predict(train_Rborist_GoodAverageBad, test_set_GoodAverageBad) %>% factor()
+
+Accuracy_Rborist_GoodAverageBad <- mean(y_hat_Rborist_GoodAverageBad == test_set_GoodAverageBad$quality_GoodAverageBad)
+Accuracy_Rborist_GoodAverageBad # Calculate Accuracy
+```
+
+\  
+
+**The random forest predicted the quality ratings after grouping with an improved overall accuracy (see exact number above), which actually might indicate a very useful prediction. We do lose some information by grouping the quality scores. However, the "standard" wine drinker most likely does not care about the exact quality score on a scale from 0-10. It might be sufficient to know if he/she has to expect a "good", "average" or "bad" quality. Even though a winemaker might prefer a more detailed quality prediction, it might already be useful to know if the wine is going to rank in the "good", "average" or "bad" section of the 0-10 quality scale (based on 11 wine properties).** 
+
+\newpage
+
+## Confusion Matrix
+
+We did already explain why overall accuracy can be a deceptive measure. Therefore, we constructed a confusion matrix, which illustrates the predictions and the actual values. Furthermore, it calculates overall accuracy, sensitivity and specificity.
+
+\  
+
+```{r Confusion Matrix Good Average Bad, echo=FALSE,  message=FALSE, fig.align='center', fig.height=5}
+
+# Create confusion matrix
+
+test_set_quality_Rborist_GoodAverageBad <- test_set_GoodAverageBad$quality_GoodAverageBad %>% factor()
+
+CM_GoodAverageBad <- confusionMatrix(data = y_hat_Rborist_GoodAverageBad, reference = test_set_quality_Rborist_GoodAverageBad)
+
+CM_GoodAverageBad$table %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 8, full_width = FALSE) %>% footnote(general = "confusion matrix")
+
+CM_GoodAverageBad$overall["Accuracy"] %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 8, full_width = FALSE) %>% footnote(general = "overall accuracy")
+
+CM_GoodAverageBad$byClass %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 6, full_width = TRUE) %>% footnote(general = "by class")
+```
+
+\  
+
+**As mentioned before, the random forest predicted the quality ratings after grouping with a higher overall accuracy (see exact number above), which might indicate a very useful prediction. However, it still did a very bad job at predicting "bad" and a bad job at predicting "good" wines. Nevertheless, very good results were obtained when predicting "average" wines.** 
+
+\newpage
+
+## Error Investigation
+
+We tried to further investigate where the errors occurred. In total we got fewer predictions wrong. However, many "good" wines and all the "bad" wines were rated wrong. Please remember that there were only very few "bad" wines in the data set. Our predictions for the largest group "average wine" were very accurate.   
+
+```{r Error Plots Good Average Bad, echo=FALSE,  message=FALSE, fig.align='center', fig.width=16, fig.height=14}
+
+# Creating a column "error" with wrong or right predictions and plots
+
+differences_GoodAverageBad <- test_set_GoodAverageBad %>% cbind.data.frame(y_hat_Rborist_GoodAverageBad) %>% mutate(error = ifelse(quality_GoodAverageBad != y_hat_Rborist_GoodAverageBad, "wrong", "right"))
+
+differences_GoodAverageBad %>% filter(error == "wrong") %>% nrow() # Amount of wrong predictions
+
+plot_error_GoodAverageBad1 <- differences_GoodAverageBad %>% ggplot(aes(x=error, y=fixed.acidity)) + geom_jitter(aes(color=quality_GoodAverageBad), alpha=0.4)
+
+plot_error_GoodAverageBad2 <- differences_GoodAverageBad %>% ggplot(aes(x=error, y=volatile.acidity)) + geom_jitter(aes(color=quality_GoodAverageBad), alpha=0.4)
+
+plot_error_GoodAverageBad3 <- differences_GoodAverageBad %>% ggplot(aes(x=error, y=citric.acid)) + geom_jitter(aes(color=quality_GoodAverageBad), alpha=0.4)
+
+plot_error_GoodAverageBad4 <- differences_GoodAverageBad %>% ggplot(aes(x=error, y=residual.sugar)) + geom_jitter(aes(color=quality_GoodAverageBad), alpha=0.4)
+
+plot_error_GoodAverageBad5 <- differences_GoodAverageBad %>% ggplot(aes(x=error, y=free.sulfur.dioxide)) + geom_jitter(aes(color=quality_GoodAverageBad), alpha=0.4)
+
+plot_error_GoodAverageBad6 <- differences_GoodAverageBad %>% ggplot(aes(x=error, y=total.sulfur.dioxide)) + geom_jitter(aes(color=quality_GoodAverageBad), alpha=0.4)
+
+plot_error_GoodAverageBad7 <- differences_GoodAverageBad %>% ggplot(aes(x=error, y=density)) + geom_jitter(aes(color=quality_GoodAverageBad), alpha=0.4)
+
+plot_error_GoodAverageBad8 <- differences_GoodAverageBad %>% ggplot(aes(x=error, y=pH)) + geom_jitter(aes(color=quality_GoodAverageBad), alpha=0.4)
+
+plot_error_GoodAverageBad9 <- differences_GoodAverageBad %>% ggplot(aes(x=error, y=sulphates)) + geom_jitter(aes(color=quality_GoodAverageBad), alpha=0.4)
+
+plot_error_GoodAverageBad10 <- differences_GoodAverageBad %>% ggplot(aes(x=error, y=alcohol)) + geom_jitter(aes(color=quality_GoodAverageBad), alpha=0.4)
+
+plot_error_GoodAverageBad11 <- differences_GoodAverageBad %>% ggplot(aes(x=error, y=chlorides)) + geom_jitter(aes(color=quality_GoodAverageBad), alpha=0.4)
+
+grid.arrange(plot_error_GoodAverageBad1, plot_error_GoodAverageBad2, plot_error_GoodAverageBad3, plot_error_GoodAverageBad4, plot_error_GoodAverageBad5, plot_error_GoodAverageBad6, plot_error_GoodAverageBad7, plot_error_GoodAverageBad8, plot_error_GoodAverageBad9, plot_error_GoodAverageBad10, plot_error_GoodAverageBad11, ncol=2)
+```
+
+\newpage
+
+# Data Set: White Wine - "Good" or "Bad"?
+
+\ 
+
+## Distribution and Correlation
+
+**Distribution:** Even the data set with three grouped ratings did hardly contain any data for "bad". Now let's try to predict the quality ratings for only two groups - "bad" (0-5) and "good" (6-10) wine.  The new "bad" group does now contain some more data but still less than the "good" group. 
+  
+**Correlation:** The grouping only caused minor changes in the correlation coefficients of the wine properties in relation to the wine quality. The correlation within the wine properties remains unchanged (same data). Remember that a 0 indicates no correlation, -1 a perfect negative and 1 a perfect positive correlation. 
+
+\  
+
+```{r Quality Good Bad Correlation Distribution, echo=FALSE, message=FALSE, fig.align='center', fig.height=5}
+
+# Change the quality rating to "good" (rating 6-10) and "bad" (rating 0-5)
+
+winequality_white_GoodBad <- winequality_white %>% mutate(quality_GoodBad = 
+                                              ifelse(winequality_white$quality == 0, "bad",   
+                                              ifelse(winequality_white$quality == 1, "bad",
+                                              ifelse(winequality_white$quality == 2, "bad",
+                                              ifelse(winequality_white$quality == 3, "bad", 
+                                              ifelse(winequality_white$quality == 4, "bad", 
+                                              ifelse(winequality_white$quality == 5, "bad", "good"))))))) %>% select(-quality)
+
+
+# Explore data - distribution of wine quality "good", "bad"
+
+plot_GoodBad_dis <- winequality_white_GoodBad %>% mutate(count = 1) %>% ggplot() + geom_col(aes(x=quality_GoodBad, y=count)) + ggtitle("Distribution White Wine - Good, Bad") + theme(plot.title = element_text(size = 8, face = "bold"))
+
+
+# Explore data - correlation of white wine quality "good", "bad" / Transform quality group to numeric
+
+plot_GoodBad_cor <- winequality_white_GoodBad %>% mutate(wine_numeric = ifelse(winequality_white_GoodBad$quality_GoodBad == "bad", 1, ifelse(winequality_white_GoodBad$quality_GoodBad == "good", 2, ""))) %>% mutate(wine_numeric = as.numeric(wine_numeric)) %>% select(-quality_GoodBad) %>% ggcorr(hjust = 1, size = 2, label=TRUE, label_size = 1.5, layout.exp = 2) + ggtitle("Correlation White Wine - Good, Bad") + theme(plot.title = element_text(size = 8, face = "bold"))
+
+grid.arrange(plot_GoodBad_cor, plot_GoodBad_dis, ncol=1)
+```
+
+\newpage
+
+## Methods/Analysis/Results
+
+The same method was applied to the new data set (Rborist in caret train function). The table "best tune" shows the combination of predFixed and minNode that resulted in the highest overall accuracy. Tuning of predFixed did not seem to cause major accuracy improvements but it increased training time substantially. The goal was again to optimize overall accuracy, which is simply defined as the overall proportion that is predicted correctly. The variable importance of Rborist changed again. However, removing/selecting certain variables does not seem to cause major improvements in overall accuracy.  
+
+\  
+
+```{r Random Forest Quality Good Bad, echo=FALSE,  message=FALSE, fig.align='center', fig.width=16, fig.height=4}
+
+# Create train set, test set - "good" and "bad" rating
+
+test_index_GoodBad <- createDataPartition(winequality_white_GoodBad$quality_GoodBad, times = 1, p = 0.5, list = FALSE)
+test_set_GoodBad <- winequality_white_GoodBad[test_index_GoodBad, ]
+train_set_GoodBad <- winequality_white_GoodBad[-test_index_GoodBad, ]
+
+
+# Let’s try to predict the quality using Rborist again - "good" and "bad" rating / Create train and prediction
+
+train_Rborist_GoodBad <- train(quality_GoodBad ~ .,
+                                      method = "Rborist",
+                                      tuneGrid = data.frame(predFixed = 0, minNode = seq(1, 5, 1)),
+                                      data = train_set_GoodBad)
+
+train_Rborist_GoodBad$bestTune %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 9, full_width = FALSE) %>% footnote(general = "best tune")
+
+plot(train_Rborist_GoodBad)
+
+varImp(train_Rborist_GoodBad, scale = FALSE)
+
+y_hat_Rborist_GoodBad <- predict(train_Rborist_GoodBad, test_set_GoodBad) %>% factor()
+
+Accuracy_Rborist_GoodBad <- mean(y_hat_Rborist_GoodBad == test_set_GoodBad$quality_GoodBad)
+Accuracy_Rborist_GoodBad # Calculate Accuracy
+```
+
+\  
+
+**The random forest predicted the quality ratings after further grouping with a slightly lower accuracy (see exact result above), which might still indicate a useful prediction. We do lose even more information by further grouping. The "standard" wine drinker most likely does not care about the exact score on a scale from 0-10. It might be sufficient to know if he/she has to expect a "good" or "bad" quality. Even though a winemaker might prefer a more detailed quality prediction, it might already be useful to know if the wine is going to rank in the "good" or "bad" section of the 0-10 quality scale (based on 11 wine properties). However, many of the bad wines would actually be nice to drink and many good wines might not be as good as promised.** 
+
+\newpage
+
+## Confusion Matrix
+
+We did already explain why overall accuracy can be a misleading measure. Therefore, we constructed a confusion matrix, which illustrates the predictions and the actual values. Furthermore, it calculates overall accuracy, sensitivity and specificity.
+
+\  
+
+```{r Confusion Matrix Good Bad, echo=FALSE,  message=FALSE, fig.align='center', fig.height=5}
+
+# Create confusion matrix
+
+test_set_quality_Rborist_GoodBad <- test_set_GoodBad$quality_GoodBad %>% factor()
+
+CM_GoodBad <- confusionMatrix(data = y_hat_Rborist_GoodBad, reference = test_set_quality_Rborist_GoodBad)
+
+CM_GoodBad$table %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 9, full_width = FALSE) %>% footnote(general = "confusion matrix")
+
+CM_GoodBad$overall["Accuracy"] %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 9, full_width = FALSE) %>% footnote(general = "overall accuracy")
+
+CM_GoodBad$byClass %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 9, full_width = FALSE) %>% footnote(general = "by class")
+```
+
+\  
+
+**As mentioned before, the random forest predicted the quality ratings after further grouping with a good but slightly lower overall accuracy (see exact value above), which might indicate a useful prediction. However, it still did a worse job at predicting "bad" than "good" wines.** 
+
+\newpage
+
+## Error Investigation
+
+We tried to further investigate where the errors occurred. Actually, the total amount of errors has increased compared to predicting three rating groups ("Average", "Good", "Bad"). However, we did not discover a clear pattern that would be helpful in improving our prediction. 
+
+```{r Error Plots Good Bad, echo=FALSE,  message=FALSE, fig.align='center', fig.width=16, fig.height=14}
+
+# Creating a column "error" with wrong or right predictions and plots
+
+differences_GoodBad <- test_set_GoodBad %>% cbind.data.frame(y_hat_Rborist_GoodBad) %>% mutate(error = ifelse(quality_GoodBad != y_hat_Rborist_GoodBad, "wrong", "right"))
+
+differences_GoodBad %>% filter(error == "wrong") %>% nrow() # Amount of wrong predictions
+
+plot_error_GoodBad1 <- differences_GoodBad %>% ggplot(aes(x=error, y=fixed.acidity)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad2 <- differences_GoodBad %>% ggplot(aes(x=error, y=volatile.acidity)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad3 <- differences_GoodBad %>% ggplot(aes(x=error, y=citric.acid)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad4 <- differences_GoodBad %>% ggplot(aes(x=error, y=residual.sugar)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad5 <- differences_GoodBad %>% ggplot(aes(x=error, y=free.sulfur.dioxide)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad6 <- differences_GoodBad %>% ggplot(aes(x=error, y=total.sulfur.dioxide)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad7 <- differences_GoodBad %>% ggplot(aes(x=error, y=density)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad8 <- differences_GoodBad %>% ggplot(aes(x=error, y=pH)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad9 <- differences_GoodBad %>% ggplot(aes(x=error, y=sulphates)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad10 <- differences_GoodBad %>% ggplot(aes(x=error, y=alcohol)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad11 <- differences_GoodBad %>% ggplot(aes(x=error, y=chlorides)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+grid.arrange(plot_error_GoodBad1, plot_error_GoodBad2, plot_error_GoodBad3, plot_error_GoodBad4, plot_error_GoodBad5, plot_error_GoodBad6, plot_error_GoodBad7, plot_error_GoodBad8, plot_error_GoodBad9, plot_error_GoodBad10, plot_error_GoodBad11, ncol=2)
+```
+
+\newpage 
+
+# Data Set: White Wine - "Good" or "Bad"? - Attempt to Balance
+
+\ 
+
+## Distribution and Correlation
+
+**Distribution:** Many classification problems turn out to be imbalanced. This data set appears to be imbalanced too. This is not surprising due to the fact that the provider of the data set states that *"the classes are ordered and not balanced (e.g. there are much more normal wines than excellent or poor ones)"* (Source: https://archive.ics.uci.edu/ml/datasets/wine+quality). According to "Using Random Forest to Learn Imbalanced Data" by Chen, Liaw and Breiman, there are two common approaches to solve this problem: a) cost sensitive learning (assigning a high cost to the misclassification of the minority class and trying to minimize overall cost) and b) sampling techniques (down-sampling the majority class or over-sampling the minority-class). The grouping of the quality rating into two classes already created a more balanced data set. However, we are going to further balance it by over-sampling the minority class. The example with only two classes ("Good" and "Bad") was used due to the fact that many R functions only accept two classes. 
+
+\ 
+
+```{r Over-sampling Quality Good Bad balanced, echo=FALSE,  message=FALSE, fig.align='center', fig.width=16, fig.height=5}
+
+# Over-sampling minority class / Create balanced train set
+
+N <- (train_set_GoodBad %>% filter(quality_GoodBad == "good") %>% nrow())*2
+train_set_GoodBad_balanced <- ovun.sample(quality_GoodBad ~ ., data = train_set_GoodBad, method = "over", N = N)$data
+
+train_set_GoodBad_balanced %>% mutate(count = 1) %>% ggplot() + geom_col(aes(x=quality_GoodBad, y=count)) + ggtitle("Balanced Train Set White Wine - Good or Bad") + theme(plot.title = element_text(size = 12, face = "bold"))
+```
+
+\newpage
+
+## Methods/Analysis/Results
+
+The same method was applied to the new data set (Rborist in caret train function). Except that now we tried to balance the two quality score classes of the train set. The function ovun.sample in the ROSE package was used. It *"creates possibly balanced samples by random over-sampling minority examples, under-sampling majority examples or combination of over- and under-sampling"* (Source: https://www.rdocumentation.org/packages/ROSE/versions/0.0-3/topics/ovun.sample). Furthermore, we tried to achieve improvements by assigning weights to classes. However, the weighting attempts did not result in improved accuracy and therefore were not implemented. The table "best tune" shows the combination of predFixed and minNode that resulted in the highest overall accuracy. Tuning of predFixed did not seem to cause major accuracy improvements but it increased training time substantially. The goal was once again to optimize overall accuracy, which is simply defined as the overall proportion that is predicted correctly. A change in the Rborist variable importance was discovered. However, selecting/removing variables does not seem to greatly improve overall accuracy. Changing the method to knn (k nearest neighbor) with tuning parameter k did not cause an improvement either (similar result).  
+
+\  
+
+```{r Random Forest Quality Good Bad balanced, echo=FALSE,  message=FALSE, fig.align='center', fig.width=16, fig.height=4}
+
+# Let’s try to predict the quality using Rborist again - "good" and "bad" rating / Create train and prediction
+
+train_Rborist_GoodBad_balanced <- train(quality_GoodBad ~ .,
+                                      method = "Rborist",
+                                      tuneGrid = data.frame(predFixed = 0, minNode = seq(1, 5, 1)),
+                                      data = train_set_GoodBad_balanced)
+
+train_Rborist_GoodBad_balanced$bestTune %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 9, full_width = FALSE) %>% footnote(general = "best tune")
+
+plot(train_Rborist_GoodBad_balanced)
+
+varImp(train_Rborist_GoodBad_balanced, scale = FALSE)
+
+y_hat_Rborist_GoodBad_balanced <- predict(train_Rborist_GoodBad_balanced, test_set_GoodBad) %>% factor()
+
+Accuracy_Rborist_GoodBad_balanced <- mean(y_hat_Rborist_GoodBad_balanced == test_set_GoodBad$quality_GoodBad)
+Accuracy_Rborist_GoodBad_balanced # Calculate Accuracy
+
+```
+
+\  
+
+**The random forest predicted the quality after grouping into two balanced classes with a slightly lower overall accuracy (see value above), that might still indicate a useful prediction.** 
+
+\newpage
+
+## Confusion Matrix
+
+We did already explain why overall accuracy can be a deceptive measure. Therefore, we constructed another confusion matrix, which illustrates the predictions and the actual values. Furthermore, it calculates overall accuracy, sensitivity and specificity.
+
+\  
+
+```{r Confusion Matrix Good Bad balanced, echo=FALSE,  message=FALSE, fig.align='center', fig.height=5}
+
+# Create confusion matrix
+
+CM_GoodBad_balanced <- confusionMatrix(data = y_hat_Rborist_GoodBad_balanced, reference = test_set_quality_Rborist_GoodBad)
+
+CM_GoodBad_balanced$table %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 9, full_width = FALSE) %>% footnote(general = "confusion matrix")
+
+CM_GoodBad_balanced$overall["Accuracy"] %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 9, full_width = FALSE) %>% footnote(general = "overall accuracy")
+
+CM_GoodBad_balanced$byClass %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 9, full_width = TRUE) %>% footnote(general = "by class")
+```
+
+\  
+
+**As mentioned before, the random forest predicted the quality ratings after grouping into two balanced classes with a lower overall accuracy (see value above), which might still indicate a useful prediction. We managed to do a better job at predicting "bad" wines. However, we did a worse job at predicting "good" wines compared to the example with imbalanced data. As a result, the accuracy is now similar in both classes.** 
+
+\newpage
+
+## Error Investigation
+
+We tried to further investigate where the errors occurred. We can see that the amount of errors increased. However, still no clear pattern visible that might help to further improve. 
+
+```{r Error Plots Good Bad balanced, echo=FALSE,  message=FALSE, fig.align='center', fig.width=16, fig.height=14}
+
+# Creating a column "error" with wrong or right predictions and plots
+
+differences_GoodBad_balanced <- test_set_GoodBad %>% cbind.data.frame(y_hat_Rborist_GoodBad_balanced) %>% mutate(error = ifelse(quality_GoodBad != y_hat_Rborist_GoodBad_balanced, "wrong", "right"))
+
+differences_GoodBad_balanced %>% filter(error == "wrong") %>% nrow() # Amount of wrong predictions
+
+plot_error_GoodBad_balanced1 <- differences_GoodBad_balanced %>% ggplot(aes(x=error, y=fixed.acidity)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad_balanced2 <- differences_GoodBad_balanced %>% ggplot(aes(x=error, y=volatile.acidity)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad_balanced3 <- differences_GoodBad_balanced %>% ggplot(aes(x=error, y=citric.acid)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad_balanced4 <- differences_GoodBad_balanced %>% ggplot(aes(x=error, y=residual.sugar)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad_balanced5 <- differences_GoodBad_balanced %>% ggplot(aes(x=error, y=free.sulfur.dioxide)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad_balanced6 <- differences_GoodBad_balanced %>% ggplot(aes(x=error, y=total.sulfur.dioxide)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad_balanced7 <- differences_GoodBad_balanced %>% ggplot(aes(x=error, y=density)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad_balanced8 <- differences_GoodBad_balanced %>% ggplot(aes(x=error, y=pH)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad_balanced9 <- differences_GoodBad_balanced %>% ggplot(aes(x=error, y=sulphates)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad_balanced10 <- differences_GoodBad_balanced %>% ggplot(aes(x=error, y=alcohol)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+plot_error_GoodBad_balanced11 <- differences_GoodBad_balanced %>% ggplot(aes(x=error, y=chlorides)) + geom_jitter(aes(color=quality_GoodBad), alpha=0.4)
+
+grid.arrange(plot_error_GoodBad_balanced1, plot_error_GoodBad_balanced2, plot_error_GoodBad_balanced3, plot_error_GoodBad_balanced4, plot_error_GoodBad_balanced5, plot_error_GoodBad_balanced6, plot_error_GoodBad_balanced7, plot_error_GoodBad_balanced8, plot_error_GoodBad_balanced9, plot_error_GoodBad_balanced10, plot_error_GoodBad_balanced11, ncol=2)
+```
+
+\newpage 
+
+# Data Set: Complete Data Set - White or Red Wine?
+
+\  
+
+## Data Set Structure
+
+There are two data sets available - one for red and one for white wine. We are going to merge the two data sets. Afterwards, we are going to try to predict if a row contains a red or a white wine. An initial familiarization with the newly combined data of white and red wine was necessary. The most obvious discovery was that we made much more data available per group (which is now the wine type). There seem to be differences between the two wine types, e.g. the data set contains higher values of total sulfur dioxide for white wine than red wine and higher values of volatile acidity for red wine than white wine. Please find below the plots (jitter combined with boxplot).
+
+\  
+
+```{r Boxplots Type of Wine, echo=FALSE,  message=FALSE, fig.align='center', fig.width=16, fig.height=14}
+
+# Let's see if we can predict the type of wine - join winequality red and white
+
+winequality_white_winetype <- winequality_white %>% mutate(wine = "white")
+winequality_red_winetype <- winequality_red %>% mutate(wine = "red")
+winequality_whiteANDred <- winequality_white_winetype %>% full_join(winequality_red_winetype)
+
+
+# Explore data - wine type red or white
+
+plot_explore_RedWhite1 <- winequality_whiteANDred %>% ggplot(aes(x=wine, y=fixed.acidity)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_RedWhite2 <- winequality_whiteANDred %>% ggplot(aes(x=wine, y=volatile.acidity)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_RedWhite3 <- winequality_whiteANDred %>% ggplot(aes(x=wine, y=citric.acid)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_RedWhite4 <- winequality_whiteANDred %>% ggplot(aes(x=wine, y=residual.sugar)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_RedWhite5 <- winequality_whiteANDred %>% ggplot(aes(x=wine, y=chlorides)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_RedWhite6 <- winequality_whiteANDred %>% ggplot(aes(x=wine, y=free.sulfur.dioxide)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_RedWhite7 <- winequality_whiteANDred %>% ggplot(aes(x=wine, y=total.sulfur.dioxide)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_RedWhite8 <- winequality_whiteANDred %>% ggplot(aes(x=wine, y=density)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4)
+
+plot_explore_RedWhite9 <- winequality_whiteANDred %>% ggplot(aes(x=wine, y=pH)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_RedWhite10 <- winequality_whiteANDred %>% ggplot(aes(x=wine, y=sulphates)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4) 
+
+plot_explore_RedWhite11 <- winequality_whiteANDred %>% ggplot(aes(x=wine, y=alcohol)) + geom_jitter(aes(color=quality), alpha=0.2) + geom_boxplot(alpha=0.4)
+
+grid.arrange(plot_explore_RedWhite1, plot_explore_RedWhite2, plot_explore_RedWhite3, plot_explore_RedWhite4, plot_explore_RedWhite5, plot_explore_RedWhite6, plot_explore_RedWhite7, plot_explore_RedWhite8, plot_explore_RedWhite9, plot_explore_RedWhite10, plot_explore_RedWhite11, ncol=2)
+```
+
+\newpage
+
+## Distribution and Correlation
+
+**Distribution:** The distribution shows that there is much more white wine than red wine in the data set. However, the red wine data set still contains 1599 rows. 
+
+**Correlation:** The correlation matrix does now show a much higher correlation between many of the wine properties and the wine types. Total sulfur dioxide shows a correlation of 0.7 and volatile acidity of -0.7. The additive sulfur dioxide is an accepted winemaking practice. It is produced in small amounts by wine yeast during alcoholic fermentation. However, most of it has been added by the winemaker at most white winemaking process steps and less liberally during red winemaking (Source: https://www.aromadictionary.com/articles/sulfurdioxide_article.html). Earlier the boxplots also indicated that the data set contains higher values of total sulfur dioxide for white wine than red wine. Volatile acidity is a problem at higher levels (limits: 1.4 g/L for red and 1.2 g/L for white) and can even smell like nail polish remover. Lower amounts can even be pleasant (e.g. fruity-smelling raspberry or cherry-like flavors). Wines that have long fermentation periods (e.g. the red wines Amarone della Valpolicella and Barolo) generally accumulate higher levels of volatile acidity (Source: https://winefolly.com/tutorial/weird-wine-flavors-and-the-science-behind-them/). Earlier the boxplots indicated that the data set contains higher values of volatile acidity for red wine than white wine. Remember that a 0 indicates no correlation, -1 a perfect negative and 1 a perfect positive correlation.  
+
+\  
+
+```{r Type of Wine Correlation Distribution, echo=FALSE, message=FALSE, fig.align='center', fig.height=5}
+
+# Explore data - distribution of wine quality white and red
+
+plot_winetype_dis <- winequality_whiteANDred %>% mutate(count = 1) %>% ggplot() + geom_col(aes(x=wine, y=count)) + ggtitle("Distribution Wine Type") + theme(plot.title = element_text(size = 8, face = "bold"))
+
+
+# Explore data - correlation of wine quality white and red / Transform wine type to numeric
+
+plot_winetype_cor <- winequality_whiteANDred %>% mutate(wine_numeric = ifelse(winequality_whiteANDred$wine == "red", 1, ifelse(winequality_whiteANDred$wine == "white", 2, ""))) %>% mutate(wine_numeric = as.numeric(wine_numeric)) %>% select(-wine, -quality) %>% ggcorr(hjust = 1, size = 2, label=TRUE, label_size = 1.5, layout.exp = 2) + ggtitle("Correlation Wine Type") + theme(plot.title = element_text(size = 8, face = "bold"))
+
+grid.arrange(plot_winetype_cor, plot_winetype_dis, ncol=1)
+```
+
+\newpage  
+
+## Methods/Analysis/Results
+
+Let's try to predict if the row contains a red or a white wine. The initial goal was again to optimize overall accuracy, which is still defined as the overall proportion that is predicted correctly. The table "best tune" shows the combination of predFixed and minNode that resulted in the highest overall accuracy. The variable importance changed from training to training. However, sulfur dioxide, chlorides and volatile acidity were usually among the top values. None of the wine properties were removed. 
+
+\  
+
+```{r Random Forest Type of Wine, echo=FALSE,  message=FALSE, fig.align='center', fig.width=16, fig.height=4}
+
+# Create train set, test set - wine type red or white
+
+test_index_winetype <- createDataPartition(winequality_whiteANDred$wine, times = 1, p = 0.5, list = FALSE)
+test_set_winetype <- winequality_whiteANDred[test_index_winetype, ] %>% select(-quality)
+train_set_winetype <- winequality_whiteANDred[-test_index_winetype, ] %>% select(-quality)
+
+
+# Let’s try to predict the wine type using Rborist - wine type red or white / Create train and prediction
+
+train_Rborist_winetype <- train(wine ~ .,
+                       method = "Rborist",
+                       tuneGrid = data.frame(predFixed = 0, minNode = seq(1, 5, 1)),
+                       data = train_set_winetype)
+
+train_Rborist_winetype$bestTune %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 9, full_width = FALSE) %>% footnote(general = "best tune")
+
+plot(train_Rborist_winetype)
+
+varImp(train_Rborist_winetype, scale = FALSE)
+
+y_hat_Rborist_winetype <- predict(train_Rborist_winetype, test_set_winetype) %>% factor()
+
+Accuracy_Rborist_winetype <- mean(y_hat_Rborist_winetype == test_set_winetype$wine)
+Accuracy_Rborist_winetype # Calculate Accuracy
+```
+
+\  
+
+**The random forest managed to predict the type of wine with a very high overall accuracy (see above). This might indicate a very useful prediction.**
+
+\newpage
+
+## Confusion Matrix
+
+We did already explain why overall accuracy can be a deceptive measure. Therefore, we constructed a confusion matrix, which illustrates the predictions and the actual values. Furthermore, it calculates overall accuracy, sensitivity and specificity.  
+
+\  
+
+```{r Confusion Matrix Type of Wine, echo=FALSE,  message=FALSE, fig.align='center', fig.height=5}
+
+# Create confusion matrix
+
+test_set_quality_Rborist_winetype <- test_set_winetype$wine %>% factor()
+
+CM_winetype <- confusionMatrix(data = y_hat_Rborist_winetype, reference = test_set_quality_Rborist_winetype)
+
+CM_winetype$table %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 9, full_width = FALSE) %>% footnote(general = "confusion matrix")
+
+CM_winetype$overall["Accuracy"] %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 9, full_width = FALSE) %>% footnote(general = "overall accuracy")
+
+CM_winetype$byClass %>% kable("latex", booktabs = T) %>% kable_styling(latex_options = c("striped", "condensed"), position = "center", font_size = 9, full_width = TRUE) %>% footnote(general = "by class")
+```
+
+\  
+
+**The random forest predicted the type of wine with a very high overall accuracy (see exact value above), which indicates a very useful prediction. In contrary to the two earlier examples the sensitivity and specificity was high too and almost equal for the two classes.**
+
+\newpage
+
+## Error Investigation
+
+We tried to further investigate where the errors occurred. We only made a few mistakes. However, we did not manage to find a clear pattern that describes how to get rid of these. 
+
+```{r Error Plots Type of Wine, echo=FALSE,  message=FALSE, fig.align='center', fig.width=16, fig.height=14}
+
+# Creating a column "error" with wrong or right predictions and plots
+
+differences_winetype <- test_set_winetype %>% cbind.data.frame(y_hat_Rborist_winetype) %>% mutate(error = ifelse(wine != y_hat_Rborist_winetype, "wrong", "right"))
+
+differences_winetype %>% filter(error == "wrong") %>% nrow() # Amount of wrong predictions
+
+plot_error_wine1 <- differences_winetype %>% ggplot(aes(x=error, y=fixed.acidity)) + geom_jitter(aes(color=wine), alpha=0.4)
+
+plot_error_wine2 <- differences_winetype %>% ggplot(aes(x=error, y=volatile.acidity)) + geom_jitter(aes(color=wine), alpha=0.4)
+
+plot_error_wine3 <- differences_winetype %>% ggplot(aes(x=error, y=citric.acid)) + geom_jitter(aes(color=wine), alpha=0.4)
+
+plot_error_wine4 <- differences_winetype %>% ggplot(aes(x=error, y=residual.sugar)) + geom_jitter(aes(color=wine), alpha=0.4)
+
+plot_error_wine5 <- differences_winetype %>% ggplot(aes(x=error, y=free.sulfur.dioxide)) + geom_jitter(aes(color=wine), alpha=0.4)
+
+plot_error_wine6 <- differences_winetype %>% ggplot(aes(x=error, y=total.sulfur.dioxide)) + geom_jitter(aes(color=wine), alpha=0.4)
+
+plot_error_wine7 <- differences_winetype %>% ggplot(aes(x=error, y=density)) + geom_jitter(aes(color=wine), alpha=0.4)
+
+plot_error_wine8 <- differences_winetype %>% ggplot(aes(x=error, y=pH)) + geom_jitter(aes(color=wine), alpha=0.4)
+
+plot_error_wine9 <- differences_winetype %>% ggplot(aes(x=error, y=sulphates)) + geom_jitter(aes(color=wine), alpha=0.4)
+
+plot_error_wine10 <- differences_winetype %>% ggplot(aes(x=error, y=alcohol)) + geom_jitter(aes(color=wine), alpha=0.4)
+
+plot_error_wine11 <- differences_winetype %>% ggplot(aes(x=error, y=chlorides)) + geom_jitter(aes(color=wine), alpha=0.4)
+
+grid.arrange(plot_error_wine1, plot_error_wine2, plot_error_wine3, plot_error_wine4, plot_error_wine5, plot_error_wine6, plot_error_wine7, plot_error_wine8, plot_error_wine9, plot_error_wine10, plot_error_wine11, ncol=2)
+```
+
+\newpage  
+
+# Conclusion  
+
+\  
+
+##Random Forest 1 / White Wine - Rating on a Scale from 0 to 10?
+The random forest method was able to predict the quality scores ranging from 1 to 10 with an overall accuracy of approximately 63 per cent (precise value for accuracy might slightly differ from training to training). Furthermore, it was mainly good at predicting "average" wines and did a poor job at detecting "bad" and "good" wines. Most likely a winemaker would want to find the recipe for the "good" wine and avoid the "bad" wine. Therefore, the overall usefulness seems limited.  
+
+##Random Forest 2 / White Wine - "Good", "Average" or "Bad"?  
+After grouping into three categories such as "good", "average" and "bad", the same random forest achieved an accuracy of approximately 85 per cent (exact accuracy might slightly differ from training to training). This seems already much better. However, it was mainly good at predicting "average" wine and still did a bad job at predicting "good" wine and a very bad job at predicting "bad" wine. This is especially unfortunate due to the fact, that the few bad wines in the data set were usually overrated as "average". 
+
+##Random Forest 3 / White Wine - "Good" or "Bad"?  
+Further grouping into only two categories "good" and "bad" resulted in an accuracy of approximately 82 per cent with a much better sensitivity and specificity (precise accuracy might slightly differ from training to training). However, we are still better at predicting "good" than "bad" and we lose lots of information by aggregating eleven quality scores into two. Furthermore, we still get many predictions wrong. Further balancing of the data set by over-sampling the "bad" class of the wine training set did not result in an improved overall accuracy (approximately 77 % / exact accuracy might slightly differ from training to training) but it resulted in an almost equal accuracy for the two classes. I guess it depends on the prediction's goal if the balanced or the imbalanced data set should be considered as the preferred choice.  
+
+##Random Forest 4 / White Wine - Possible Limitations    
+The physicochemical properties do not seem to be clearly distinguishable from one quality rating to the other. A possible reason might be the lack of data for all the bad and good ratings. The data set mainly contains average wines. Therefore, it might be necessary to collect further data to balance the data set. Additionally, the exact meaning of the ratings ranging from 1 to 10 was unknown. Therefore, it was hard to capture the logic in corresponding groups (e.g. where does "average" end and "bad" start). Lastly, wine quality seems to be a challenging topic, e.g. volatile acidity might even add complexity and interest to many wines but in high quantities it can be disturbing (similar to the smell of vinegar or nail polish). 
+
+##Random Forest 5 / Complete Data Set - White or Red Wine?  
+The random forest seems to perform very well in predicting "red" and "white" wine, where the physicochemical properties seem to be more distinct and the available data larger. We achieved an overall accuracy, sensitivity and specificity of approximately 99 per cent (exact value might slightly differ from training to training). However, I do not know if it is useful to predict the type of wine from 11 wine properties. There are probably easier methods to do that (e.g. looking at the colour). Nevertheless, we still might be able to learn something about the differences of red and white wine.   
+
+\  
+
+**************************
